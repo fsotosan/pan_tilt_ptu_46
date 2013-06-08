@@ -1,0 +1,14 @@
+<package>
+  <description brief="pan_tilt_ptu_46">
+
+     pan_tilt_ptu_46
+
+  </description>
+  <author>nando</author>
+  <license>BSD</license>
+  <review status="unreviewed" notes=""/>
+  <url>http://ros.org/wiki/pan_tilt_ptu_46</url>
+
+</package>
+
+
