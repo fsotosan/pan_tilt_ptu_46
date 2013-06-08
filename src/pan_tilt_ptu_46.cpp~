@@ -1,0 +1,43 @@
+#include <iostream>
+#include "ros/ros.h"
+#include "sensor_msgs/JointState.h"
+
+using namespace std;
+
+void posCallback(const sensor_msgs::JointState.msg& inJointState);
+
+ros::NodeHandle* myNodeHandle = 0;
+
+int main(int argc, char** argv) {
+
+	ros::init(argc, argv, "youbot_arm_move");
+	ros::NodeHandle theNodeHandle;
+	myNodeHandle = &theNodeHandle;
+	ros::Subscriber theSubscriber = theNodeHandle.subscribe("/ptu_46_in", 10, posCallback);
+	ros::Publisher thePublisher = theNodeHandle.advertise<sensor_msgs::JointState>("/ptu_46_out",10);
+
+	ROS_INFO("Nodo de control PTU-46 iniciado");
+
+	// Init PTU-46
+
+	ros::Rate r(10); // 10 hz
+	while (myNodeHandle->ok()) {
+
+
+
+		//thePublisher.publish(theMsg);
+		ros::spinOnce();
+	}
+
+	cout << "Programa terminado" << endl;
+	return 0;
+
+}
+
+
+void posCallback(const sensor_msgs::JointState.msg& inJointState) {
+
+
+
+
+}
