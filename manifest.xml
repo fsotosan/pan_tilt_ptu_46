@@ -7,7 +7,9 @@
   <author>nando</author>
   <license>BSD</license>
   <review status="unreviewed" notes=""/>
-  <url>http://ros.org/wiki/pan_tilt_ptu_46</url>
+  <url></url>
+  <depend package="roscpp"/>
+  <depend package="sensor_msgs"/>
 
 </package>
 

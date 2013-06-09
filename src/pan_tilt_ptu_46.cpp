@@ -9,7 +9,9 @@ extern "C" {
 }
 
 
-#define TEST_ERROR	-1
+#define PI 3.1415927
+#define PAN_RESOLUTION 185.1428
+#define TILT_RESOLUTION 185.1428
 
 using namespace std;
 
@@ -21,17 +23,18 @@ char tmpChar;
 char status;
 char* mySerialDevice = "/dev/ttyUSB0";
 
-char return_error ()
-{ printf("(Enter 'c' to continue): ");
-  tmpChar = 'f';
-  while (tmpChar != 'c')
-	    tmpChar = tolower(getchar());
-  return(TEST_ERROR);
+char return_error () {
+	printf("(Enter 'c' to continue): ");
+	tmpChar = 'f';
+	while (tmpChar != 'c')
+		tmpChar = tolower(getchar());
+	return(-1);
 }
 
 char return_error_status (char *failed_binary_op, char return_status)
-{ printf("! %s failed with status %d\n",failed_binary_op, return_status);
-  return ( return_error() );
+{
+	printf("! %s failed with status %d\n",failed_binary_op, return_status);
+	return ( return_error() );
 }
 
 
@@ -40,15 +43,16 @@ char test_position_commands(void)
 
 
 	int val;
-	long lval_in;
 
-	/* pan position command */
-	 val = -2500;
+	val = 2500;
 
-	 if ((status = set_desired(PAN, POSITION, (PTU_PARM_PTR *) &val, ABSOLUTE)) == TRUE)
-		 { return (  return_error_status( "PAN_SET_ABS_POSITION", status) );
-				}
-	 else printf("\nPAN_SET_ABS_POSITION executed\n");
+	status = set_desired(PAN, POSITION, (PTU_PARM_PTR *) &val, ABSOLUTE);
+
+	if (status == TRUE) {
+		return (return_error_status( "PAN_SET_ABS_POSITION", status));
+	} else {
+		printf("\nPAN_SET_ABS_POSITION executed\n");
+	}
 
 	 /*
 
@@ -56,9 +60,12 @@ char test_position_commands(void)
 	 return(PTU_OK);
 }
 
+
+
+
 int main(int argc, char** argv) {
 
-	ros::init(argc, argv, "youbot_arm_move");
+	ros::init(argc, argv, "pan_tilt_ptu_46");
 	ros::NodeHandle theNodeHandle;
 	myNodeHandle = &theNodeHandle;
 	ros::Subscriber theSubscriber = theNodeHandle.subscribe("/ptu_46_in", 10, posCallback);
@@ -68,10 +75,20 @@ int main(int argc, char** argv) {
 
 	// Init PTU-46
 
-	portstream_fd fd = openserial(mySerialDevice);
+	portstream_fd fd = open_host_port(mySerialDevice);
 
+	sleep(5);
 
-	closeserial(fd);
+	if ( fd == PORT_NOT_OPENED ) {
+		printf("\nSerial Port setup error.\n");
+		return -1;
+	}
+
+	set_mode(ASCII_ECHO_MODE, ON_MODE);
+
+	test_position_commands();
+
+	close_host_port(fd);
 
 	ros::Rate r(10); // 10 hz
 	while (myNodeHandle->ok()) {
@@ -82,7 +99,7 @@ int main(int argc, char** argv) {
 		ros::spinOnce();
 	}
 
-	//closeserial(fd);
+	close_host_port(fd);
 
 	cout << "Programa terminado" << endl;
 	return 0;
@@ -90,9 +107,34 @@ int main(int argc, char** argv) {
 }
 
 
+
 void posCallback(const sensor_msgs::JointState& inJointState) {
 
+	float thePosDeg = inJointState.position * 180 / PI;
+	int thePosVal;
+	int theParam;
 
+	switch(inJointState.name) {
 
+		case "PAN":
+
+			thePosVal = (int) (thePosDeg * 3600 / PAN_RESOLUTION);
+			theParam = PAN;
+			break;
+
+		case "TILT":
+
+			thePosVal = (int) (thePosDeg * 3600 / TILT_RESOLUTION);
+			theParam = TILT;
+			break;
+
+		default:
+
+			// inesperado
+			return;
+
+	}
+
+	status = set_desired(theParam, POSITION, (PTU_PARM_PTR *) &thePosVal, ABSOLUTE);
 
 }
