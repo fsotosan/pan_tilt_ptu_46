@@ -1,6 +1,7 @@
 #include <iostream>
 #include "ros/ros.h"
 #include "sensor_msgs/JointState.h"
+#include "sensor_msgs/Joy.h"
 extern "C" {
 	#include "serial.h"
 	#include "time.h"
@@ -8,8 +9,14 @@ extern "C" {
 
 
 #define PI 				3.1415927
+
+// Resolución por defecto del PTU en segundos de grado
+
 #define PAN_RESOLUTION 	185.1428
 #define TILT_RESOLUTION 185.1428
+
+#define JOYSTEP_PAN_DEG	10.0
+#define JOYSTEP_TILT_DEG	10.0
 
 #define PTU_OK			0
 #define PTU_ERROR		1
@@ -24,6 +31,7 @@ extern "C" {
 using namespace std;
 
 void posCallback(const sensor_msgs::JointState& inJointState);
+void joyCallback(const sensor_msgs::Joy& inJoyCommand);
 bool getPosCommand(float inDeg, int inMode, int inTargetJoint, char* outCommand);
 void delay(int milliseconds);
 void processPtuComm();
@@ -34,8 +42,6 @@ char tmpChar;
 char status;
 char* mySerialDevice = "/dev/ttyUSB0";
 int fd;
-char theLastCommand[16];
-char theLastResponseStatus;
 queue RX_Q = {0, 0};
 
 sensor_msgs::JointState thePtuJointState;
@@ -60,8 +66,9 @@ int main(int argc, char** argv) {
 	ros::init(argc, argv, "pan_tilt_ptu_46");
 	ros::NodeHandle theNodeHandle;
 	myNodeHandle = &theNodeHandle;
-	ros::Subscriber theSubscriber = theNodeHandle.subscribe("/ptu_46_in", 10, posCallback);
-	ros::Publisher thePublisher = theNodeHandle.advertise<sensor_msgs::JointState>("/ptu_46_out",10);
+	ros::Subscriber thePosSubscriber = theNodeHandle.subscribe("/ptu_46_pos_in", 10, posCallback);
+	ros::Subscriber theJoySubscriber = theNodeHandle.subscribe("/joy", 10, joyCallback);
+	ros::Publisher thePublisher = theNodeHandle.advertise<sensor_msgs::JointState>("/ptu_46_pos_out",10);
 
 	ROS_INFO("Nodo de control PTU-46 iniciado");
 
@@ -70,7 +77,7 @@ int main(int argc, char** argv) {
 	fd = initSerial("/dev/ttyUSB0",9600,'N',8,1);
 	if (fd < 0) {
 		printf("No se puede abrir dispositivo serie\n");
-		return fd;
+		//return fd;
 	}
 
 	ros::Rate r(2); // 2 hz
@@ -164,6 +171,37 @@ void posCallback(const sensor_msgs::JointState& inJointState) {
 
 }
 
+
+void joyCallback(const sensor_msgs::Joy& inJoyCommand) {
+
+	char thePanCommand[16];
+	char theTiltCommand[16];
+	float theAxesH = (float)inJoyCommand.axes[0];
+	float theAxesV = (float)inJoyCommand.axes[1];
+
+	printf("Recibido comando joystick (%g,%g)\n",theAxesV,theAxesH);
+
+	// Interpretar los comandos de Joystick como instrucciones
+	// para mover JOYSTEP_PAN_DEG (JOYSTEP_PAN_TILT) grados el eje correspondiente (PAN o TILT) en el sentido indicado
+
+	if (theAxesH != 0.0) {
+		getPosCommand(theAxesH*JOYSTEP_PAN_DEG,PAN,RELATIVE,thePanCommand);
+		if (write(fd,thePanCommand,strlen(thePanCommand)) > 0) {
+			STATUS = WAIT_COMMAND_CONF;
+			processPtuComm();
+		}
+	}
+
+	if (theAxesV != 0.0) {
+		getPosCommand(theAxesV*JOYSTEP_TILT_DEG,TILT,RELATIVE,theTiltCommand);
+		if (write(fd,theTiltCommand,strlen(theTiltCommand)) > 0) {
+			STATUS = WAIT_COMMAND_CONF;
+			processPtuComm();
+		}
+	}
+
+}
+
 /*
  * Función de retardo con espera activa
  * No usamos sleep porque por el modo de gestionar la comunicación serie
@@ -181,6 +219,9 @@ void delay(int milliseconds) {
 void processPtuComm() {
 
 	int bytesReceived;
+	int i;
+	char c;
+	float deg;
 
 	/*
 	 * Comprobar datos serie. Esta conexión serie es no bloqueante
@@ -195,7 +236,7 @@ void processPtuComm() {
 			delay(100);
 			bytesReceived = read(fd,buf,255);
 			if (bytesReceived > 0) {
-				int i;
+
 				for (i=0;i<bytesReceived;i++) {
 					RX_enqueue(&RX_Q,buf[i]);
 				}
@@ -223,7 +264,34 @@ void processPtuComm() {
 
 			case WAIT_COMMAND_CONF:
 
-				char c;
+				do {
+					c = RX_dequeue(&RX_Q);
+				} while ((c != '!') && (c != '*') && (RX_Q.numElem > 0));
+
+				switch(c) {
+					case '!':
+						// Error en el comando
+						if(RX_Q.numElem > 0) printf("Error en el último comando: %s",RX_toStr(&RX_Q));
+						break;
+					case '*':
+						// Comando confirmado
+						break;
+					default:
+						// Inesperado
+						break;
+				}
+
+				STATUS = IDLE;
+				break;
+
+			case WAIT_POS_PAN:
+			case WAIT_POS_TILT:
+
+				// Extraer la información del mensaje de respuesta
+				// Ejemplo de mensaje esperado:
+				// * Current Pan position is -2500
+
+				int pos;
 
 				do {
 					c = RX_dequeue(&RX_Q);
@@ -232,49 +300,58 @@ void processPtuComm() {
 				switch(c) {
 					case '!':
 						// Error en el comando
-						theLastResponseStatus = PTU_ERROR;
 						if(RX_Q.numElem > 0) printf("Error en el último comando: %s",RX_toStr(&RX_Q));
 						break;
 					case '*':
 						// Comando confirmado
-						theLastResponseStatus = PTU_OK;
+						if (RX_Q.numElem == 0) {
+							STATUS = IDLE;
+							return;
+						}
+						//  Avanzamos en la cola hasta encontrar dígitos o signo '-'
+						do {
+							c = RX_dequeue(&RX_Q);
+						} while ((RX_Q.numElem > 0)&&(!(c == '-')||((c >= '0')&&(c <= '9'))));
+						if (RX_Q.numElem == 0) {
+							STATUS = IDLE;
+							return;
+						}
+						char posNumber[16];
+						i = 1;
+						posNumber[0] = c;
+						while ((RX_Q.numElem > 0)&&(i<16)) {
+							c = RX_dequeue(&RX_Q);
+							if ((c >= '0')&&(c <= '9')) {
+								posNumber[i++] = c;
+							} else {
+								break;
+							}
+						}
+						posNumber[i] = '\0';
+						pos = atoi(posNumber);
+						if (STATUS == WAIT_POS_PAN) {
+							deg = (float)pos * PAN_RESOLUTION / 3600;
+							thePtuJointState.position[0] = deg;
+						} else if (STATUS == WAIT_POS_TILT) {
+							deg = (float)pos * TILT_RESOLUTION / 3600;
+							thePtuJointState.position[1] = deg;
+						}
 						break;
 					default:
 						// Inesperado
-						theLastResponseStatus = PTU_UNEXPECTED;
 						break;
 				}
 
 				STATUS = IDLE;
 				break;
 
-			case WAIT_POS_PAN:
-
-				float panDeg = 0.0;
-
-				// Extraer la información del mensaje de respuesta
-
-				thePtuJointState.position[0] = panDeg;
+			default:
 
 				STATUS = IDLE;
 				break;
-
-			case WAIT_POS_TILT:
-
-				float tiltDeg = 0.0;
-
-				// Extraer la información del mensaje de respuesta
-
-				thePtuJointState.position[1] = tiltDeg;
-
-				STATUS = IDLE;
-				break;
-
 
 		}
 
 	}
-
-
 
 }
