@@ -5,6 +5,7 @@
 extern "C" {
 	#include "serial.h"
 	#include "time.h"
+	#include "error.h"
 }
 
 
@@ -32,8 +33,8 @@ using namespace std;
 
 void posCallback(const sensor_msgs::JointState& inJointState);
 void joyCallback(const sensor_msgs::Joy& inJoyCommand);
-bool getPosCommand(float inDeg, int inMode, int inTargetJoint, char* outCommand);
-void delay(int milliseconds);
+bool getPosCommand(float inDeg, int inTargetJoint, int inMode, char* outCommand);
+void mydelay_ms(int milliseconds);
 void processPtuComm();
 
 ros::NodeHandle* myNodeHandle = 0;
@@ -55,6 +56,23 @@ enum estado {
 
 estado STATUS = IDLE;
 
+
+int envia(int inFd, const char* inStr, int numChars) {
+
+	int i;
+	//printf("Enviando: '%s'\n","I ");
+	write(inFd,"I ",2);
+	processPtuComm();
+	//printf("Enviando: '%s'\n",inStr);
+	write(inFd,inStr,numChars);
+	processPtuComm();
+	//printf("Enviando: '%s'\n","A ");
+	write(inFd,"A ",2);
+	processPtuComm();
+
+
+}
+
 int main(int argc, char** argv) {
 
 	thePtuJointState.name.resize(2); 	// array de tamaño 2: PAN y TILT
@@ -66,7 +84,7 @@ int main(int argc, char** argv) {
 	ros::init(argc, argv, "pan_tilt_ptu_46");
 	ros::NodeHandle theNodeHandle;
 	myNodeHandle = &theNodeHandle;
-	ros::Subscriber thePosSubscriber = theNodeHandle.subscribe("/ptu_46_pos_in", 10, posCallback);
+	//ros::Subscriber thePosSubscriber = theNodeHandle.subscribe("/ptu_46_pos_in", 10, posCallback);
 	ros::Subscriber theJoySubscriber = theNodeHandle.subscribe("/joy", 10, joyCallback);
 	ros::Publisher thePublisher = theNodeHandle.advertise<sensor_msgs::JointState>("/ptu_46_pos_out",10);
 
@@ -77,22 +95,30 @@ int main(int argc, char** argv) {
 	fd = initSerial("/dev/ttyUSB0",9600,'N',8,1);
 	if (fd < 0) {
 		printf("No se puede abrir dispositivo serie\n");
-		//return fd;
+		return fd;
 	}
 
-	ros::Rate r(2); // 2 hz
+	ROS_INFO("Puerto serie abierto");
+
+	// Enviamos comando de modo de ejecución inmediato
+
+	// envia(fd,"I ",2);	// Modo inmediato
+	// envia(fd,"FT ",3);	// Respuestas escuetas
+
+	ros::Rate r(1); // 1 hz
 	while (myNodeHandle->ok()) {
 
+/*
 		// Enviamos al PTU petición de posición PAN
-		write(fd,"PP\n",3);
+		envia(fd,"PP\n",3);
 		STATUS = WAIT_POS_PAN;
 		processPtuComm();
 
 		// Enviamos al PTU petición de posición TILT
-		write(fd,"TP\n",3);
+		envia(fd,"TP\n",3);
 		STATUS = WAIT_POS_TILT;
 		processPtuComm();
-
+*/
 		// Publicamos la posición obtenida
 		thePublisher.publish(thePtuJointState);
 		ros::spinOnce();
@@ -104,7 +130,7 @@ int main(int argc, char** argv) {
 }
 
 
-bool getPosCommand(float inDeg, int inMode, int inTargetJoint, char* outCommand) {
+bool getPosCommand(float inDeg, int inTargetJoint, int inMode, char* outCommand) {
 
 	int thePosVal;
 	char theParam;
@@ -136,7 +162,7 @@ bool getPosCommand(float inDeg, int inMode, int inTargetJoint, char* outCommand)
 	}
 
 	if (ok) {
-		sprintf(outCommand,"%c%c%d\n",theParam,theMode,thePosVal);
+		sprintf(outCommand,"%c%c%d ",theParam,theMode,thePosVal);
 	}
 
 	return ok;
@@ -156,11 +182,11 @@ void posCallback(const sensor_msgs::JointState& inJointState) {
 	theBuildCommandOk = theBuildCommandOk && getPosCommand(theTiltDeg,TILT,ABSOLUTE,theTiltCommand);
 
 	if (theBuildCommandOk) {
-		if (write(fd,thePanCommand,strlen(thePanCommand)) > 0) {
+		if (envia(fd,thePanCommand,strlen(thePanCommand)) > 0) {
 			STATUS = WAIT_COMMAND_CONF;
 			processPtuComm();
 		}
-		if (write(fd,theTiltCommand,strlen(theTiltCommand)) > 0) {
+		if (envia(fd,theTiltCommand,strlen(theTiltCommand)) > 0) {
 			STATUS = WAIT_COMMAND_CONF;
 			processPtuComm();
 		}
@@ -186,7 +212,7 @@ void joyCallback(const sensor_msgs::Joy& inJoyCommand) {
 
 	if (theAxesH != 0.0) {
 		getPosCommand(theAxesH*JOYSTEP_PAN_DEG,PAN,RELATIVE,thePanCommand);
-		if (write(fd,thePanCommand,strlen(thePanCommand)) > 0) {
+		if (envia(fd,thePanCommand,strlen(thePanCommand)) > 0) {
 			STATUS = WAIT_COMMAND_CONF;
 			processPtuComm();
 		}
@@ -194,7 +220,7 @@ void joyCallback(const sensor_msgs::Joy& inJoyCommand) {
 
 	if (theAxesV != 0.0) {
 		getPosCommand(theAxesV*JOYSTEP_TILT_DEG,TILT,RELATIVE,theTiltCommand);
-		if (write(fd,theTiltCommand,strlen(theTiltCommand)) > 0) {
+		if (envia(fd,theTiltCommand,strlen(theTiltCommand)) > 0) {
 			STATUS = WAIT_COMMAND_CONF;
 			processPtuComm();
 		}
@@ -208,7 +234,7 @@ void joyCallback(const sensor_msgs::Joy& inJoyCommand) {
  * las señales recibidas al llegar datos serie no dejan terminar el período establecido en sleep
  * (sleep pausa el proceso hasta que se cumpla el intervalo establecido o hasta que se reciba una señal)
  */
-void delay(int milliseconds) {
+void mydelay_ms(int milliseconds) {
 
 	time_t t = time(NULL) + milliseconds;
 	while(time(NULL) < t);
@@ -230,24 +256,31 @@ void processPtuComm() {
 	 * Si hay datos disponibles se introducen en una cola para su posterior procesamiento.
 	 */
 
-	if(serialDataReceived()) {
-		char buf[255];
-		do {
-			delay(100);
-			bytesReceived = read(fd,buf,255);
-			if (bytesReceived > 0) {
 
-				for (i=0;i<bytesReceived;i++) {
-					RX_enqueue(&RX_Q,buf[i]);
-				}
-			}
-		} while(bytesReceived > 0);
-
+	char buf[255];
+	bytesReceived = read(fd,buf,255);
+	if (bytesReceived < 0) {
+		//printf("[Fer debug] Ignorando: %s\n", strerror(errno));
+		errno = 0;
 	}
+	while(bytesReceived > 0) {
+		printf("[Fer debug] Recibidos: %d bytes\n", bytesReceived);
+		for (i=0;i<bytesReceived;i++) {
+			RX_enqueue(&RX_Q,buf[i]);
+		}
+		bytesReceived = read(fd,buf,255);
+		if (bytesReceived < 0) {
+			//printf("[Fer debug] Ignorando: %s\n", strerror(errno));
+			errno = 0;
+		}
+	}
+
 
 	/*
 	 * Comprobar los datos recibidos mediante puerto serie
 	 */
+
+	printf("[Fer debug] Estado %d. Elementos en cola: %d: %s\n", STATUS, RX_Q.numElem, RX_showContents(&RX_Q));
 
 	if(RX_Q.numElem > 0) {
 
@@ -275,11 +308,14 @@ void processPtuComm() {
 						break;
 					case '*':
 						// Comando confirmado
+						printf("Ok\n");
 						break;
 					default:
 						// Inesperado
 						break;
 				}
+
+				printf("%s\n",RX_toStr(&RX_Q));
 
 				STATUS = IDLE;
 				break;
@@ -353,5 +389,7 @@ void processPtuComm() {
 		}
 
 	}
+
+	return;
 
 }
