@@ -19,6 +19,8 @@ extern "C" {
 #define JOYSTEP_PAN_DEG	10.0
 #define JOYSTEP_TILT_DEG	10.0
 
+#define SERIALDEVICE	"/dev/ttyUSB0"
+
 #define PTU_OK			0
 #define PTU_ERROR		1
 #define PTU_UNEXPECTED	2
@@ -92,9 +94,9 @@ int main(int argc, char** argv) {
 
 	// Init PTU-46
 
-	fd = initSerial("/dev/ttyUSB0",9600,'N',8,1);
+	fd = initSerial(SERIALDEVICE,9600,'N',8,1);
 	if (fd < 0) {
-		printf("No se puede abrir dispositivo serie\n");
+		printf("No se puede abrir dispositivo serie '%s'. Error: '%s'\n",SERIALDEVICE,strerror(errno)) ;
 		return fd;
 	}
 

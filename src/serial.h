@@ -15,3 +15,4 @@ typedef struct {
 void RX_enqueue(queue* q,unsigned char c);
 unsigned char RX_dequeue(queue* q);
 char* RX_toStr(queue* q);
+char* RX_showContents(queue* q);

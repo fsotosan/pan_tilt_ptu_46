@@ -240,3 +240,21 @@ char* RX_toStr(queue* q) {
 
 	return str;
 }
+
+char* RX_showContents(queue* q) {
+
+	int i;
+	int len = q->numElem;
+	char* str = malloc(len+1);
+
+	if(str == NULL) return NULL;
+
+	for (i=0;i<len;i++) {
+		str[i] = RX_dequeue(q);
+		RX_enqueue(q,str[i]);
+	}
+	str[len] = '\0';
+
+	return str;
+
+}
